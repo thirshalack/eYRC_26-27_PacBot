@@ -86,11 +86,294 @@ HEADING_DELTA = {
 # ============================================================================
 # YOUR ALGORITHM GOES HERE. Everything above and below is plumbing.
 # ============================================================================
-def choose_command(pacbot_cell, pacbot_yaw, pellets_remaining):
-    """FRONT/LEFT/RIGHT/BACK to send now, or None. pacbot_cell=(row,col),
-    pacbot_yaw one of HEADING_DELTA's keys, pellets_remaining=set of
-    (row,col). Implement this -- see EXIT_CELLS above for the 2 exits."""
+
+from collections import deque
+
+
+def can_move(cell, direction):
+    """Check whether movement is possible from the given maze cell."""
+
+    r, c = cell
+
+    dr, dc, wall = HEADING_DELTA[float(direction)]
+
+    nr = r + dr
+    nc = c + dc
+
+    if nr < 0 or nr >= MAZE_ROWS or nc < 0 or nc >= MAZE_COLS:
+        return False
+
+    if WALLS[r][c] & wall:
+        return False
+
+    opposite_wall = {
+        WALL_N: WALL_S,
+        WALL_E: WALL_W,
+        WALL_S: WALL_N,
+        WALL_W: WALL_E,
+    }[wall]
+
+    if WALLS[nr][nc] & opposite_wall:
+        return False
+
+    return True
+
+
+def get_neighbors(cell):
+    """Return reachable neighbouring cells."""
+
+    r, c = cell
+    neighbors = []
+
+    for direction in (0.0, 90.0, 180.0, 270.0):
+
+        if can_move(cell, direction):
+
+            dr, dc, _ = HEADING_DELTA[direction]
+
+            neighbors.append((r + dr, c + dc))
+
+    return neighbors
+
+
+def bfs(start, goal):
+    """Return shortest path from start to goal."""
+
+    if start == goal:
+        return [start]
+
+    queue = deque([start])
+    parent = {start: None}
+
+    while queue:
+
+        current = queue.popleft()
+
+        for neighbor in get_neighbors(current):
+
+            if neighbor in parent:
+                continue
+
+            parent[neighbor] = current
+
+            if neighbor == goal:
+
+                path = []
+                node = neighbor
+
+                while node is not None:
+                    path.append(node)
+                    node = parent[node]
+
+                path.reverse()
+                return path
+
+            queue.append(neighbor)
+
     return None
+
+
+def path_length(start, goal):
+    path = bfs(start, goal)
+
+    if path is None:
+        return float("inf")
+
+    return len(path) - 1
+
+
+def direction_between(a, b):
+    """Find heading required to move from a to b."""
+
+    ar, ac = a
+    br, bc = b
+
+    if br > ar:
+        return 90.0
+
+    if br < ar:
+        return 270.0
+
+    if bc > ac:
+        return 0.0
+
+    if bc < ac:
+        return 180.0
+
+    return None
+
+
+def turn_command(current_yaw, target_yaw):
+    """Return one turn command."""
+
+    difference = (target_yaw - current_yaw) % 360
+
+    if difference == 0:
+        return None
+
+    if difference == 90:
+        return "LEFT"
+
+    if difference == 270:
+        return "RIGHT"
+
+    if difference == 180:
+        return "BACK"
+
+    return None
+
+
+def choose_best_exit(cell):
+
+    best = None
+
+    for exit_row, exit_col, exit_facing in EXIT_CELLS:
+
+        exit_cell = (exit_row, exit_col)
+
+        path = bfs(cell, exit_cell)
+
+        if path is None:
+            continue
+
+        distance = len(path) - 1
+
+        facing_map = {
+            "east": 0.0,
+            "north": 90.0,
+            "west": 180.0,
+            "south": 270.0,
+        }
+
+        required_yaw = facing_map[exit_facing]
+
+        if best is None or distance < best[0]:
+            best = (distance, path, required_yaw)
+
+    return best
+
+
+def choose_command(pacbot_cell, pacbot_yaw, pellets_remaining):
+    """
+    Choose exactly one command.
+
+    IMPORTANT:
+    pacbot_cell is already in the coordinate convention used
+    by WALLS and HEADING_DELTA.
+
+    Do NOT swap its coordinates here.
+    """
+
+    robot = pacbot_cell
+    current_yaw = float(pacbot_yaw)
+
+    # ------------------------------------------------------------
+    # PELLET PHASE
+    # ------------------------------------------------------------
+
+    if pellets_remaining:
+
+        pellets = list(pellets_remaining)
+
+        if len(pellets) == 1:
+
+            target = pellets[0]
+
+        else:
+
+            pellet_a = pellets[0]
+            pellet_b = pellets[1]
+
+            d_ab = (
+                path_length(robot, pellet_a)
+                + path_length(pellet_a, pellet_b)
+            )
+
+            d_ba = (
+                path_length(robot, pellet_b)
+                + path_length(pellet_b, pellet_a)
+            )
+
+            if d_ab <= d_ba:
+                target = pellet_a
+            else:
+                target = pellet_b
+
+        path = bfs(robot, target)
+
+        if path is None:
+            print(
+                f"[algorithm] No path from "
+                f"{robot} to pellet {target}"
+            )
+            return None
+
+        # We have reached the pellet.
+        # Wait for simulator to update pellets_remaining.
+        if len(path) == 1:
+            return None
+
+    # ------------------------------------------------------------
+    # EXIT PHASE
+    # ------------------------------------------------------------
+
+    else:
+
+        exit_info = choose_best_exit(robot)
+
+        if exit_info is None:
+
+            print(
+                f"[algorithm] No path from {robot} to an exit"
+            )
+
+            return None
+
+        _, path, required_yaw = exit_info
+
+        # Already at exit cell.
+        if len(path) == 1:
+
+            command = turn_command(
+                current_yaw,
+                required_yaw
+            )
+
+            if command is not None:
+                return command
+
+            return "FRONT"
+
+    # ------------------------------------------------------------
+    # DETERMINE NEXT CELL
+    # ------------------------------------------------------------
+
+    next_cell = path[1]
+
+    target_yaw = direction_between(
+        robot,
+        next_cell
+    )
+
+    # ------------------------------------------------------------
+    # TURN
+    # ------------------------------------------------------------
+
+    command = turn_command(
+        current_yaw,
+        target_yaw
+    )
+
+    if command is not None:
+        return command
+
+    # ------------------------------------------------------------
+    # MOVE FORWARD
+    # ------------------------------------------------------------
+
+    return "FRONT"
+
+
 # ============================================================================
 
 
