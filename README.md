@@ -4,7 +4,7 @@ Launch files and boilerplate for every PacBot task. Clone this once, and pull
 when a new task is released.
 
 Full instructions, rules and marking live on the task site:
-**<https://portal.e-yantra.org/courses/theme_pb>**
+**<https://themes.e-yantra.org/Pacbot_2627/>**
 
 ---
 
@@ -93,3 +93,5 @@ it names and keep the lines you want.
 
 ---
 
+Everything else, including the rules and the marking scheme for each task, is
+on the task site: **<https://themes.e-yantra.org/Pacbot_2627/>**
